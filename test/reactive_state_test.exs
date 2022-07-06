@@ -96,6 +96,8 @@ defmodule ReactiveStateTest do
       end
 
       defcomputed pretty_count(count, pretty_mode) do
+        send(self(), :pretty_count_computed)
+
         case pretty_mode do
           :raw ->
             count
@@ -175,6 +177,19 @@ defmodule ReactiveStateTest do
 
       {_, changes} = ReactiveState.assign(struct, all: [1])
       refute Keyword.has_key?(changes, :count)
+    end
+
+    test "doesn't recompute when unchanged" do
+      struct = %AssignTest{}
+
+      assert {struct = %{pretty_count: 2, pretty_mode: :raw}, _} =
+               ReactiveState.assign(struct, all: [4, 5])
+
+      assert_received :pretty_count_computed
+
+      assert {_, []} = ReactiveState.assign(struct, pretty_mode: :raw)
+
+      refute_receive :pretty_count_computed
     end
   end
 end

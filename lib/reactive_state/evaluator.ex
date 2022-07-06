@@ -24,26 +24,72 @@ defmodule ReactiveState.Evaluator do
     keys = Keyword.keys(assigns)
     assert_valid_inputs(evaluator, keys, struct)
 
-    recompute = determine_updates(evaluator, keys)
+    state = %{
+      to_check: Map.new(keys, &{&1, true}),
+      changes: [],
+      struct: struct
+    }
+
+    %{changes: changes, struct: updated} =
+      evaluator.order
+      |> Enum.reduce(state, fn field, state = %{changes: changes, struct: struct} ->
+        if state.to_check[field] do
+          new_struct = do_update(struct, field, assigns, module)
+
+          if new_struct != struct do
+            state = include_related_fields(evaluator, field, state)
+            %{state | changes: [field | changes], struct: new_struct}
+          else
+            state
+          end
+        else
+          state
+        end
+      end)
 
     updated =
-      recompute
-      |> Enum.reduce(struct!(struct, assigns), fn fun, struct ->
-        apply(module, fun, [struct])
-      end)
+      updated
       |> Map.drop(evaluator.private_fields)
 
     changes =
-      (recompute ++ keys)
+      changes
       |> Enum.reject(&Enum.member?(evaluator.private_fields, &1))
       |> Enum.map(&{&1, Map.get(updated, &1)})
 
     {updated, changes}
   end
 
-  def determine_updates(evaluator, keys) do
-    affected = determine_affected(evaluator, keys, %{})
-    Enum.filter(evaluator.order, &affected[&1])
+  defp include_related_fields(evaluator, field, state) do
+    triggers = related_fields(evaluator.triggers, field)
+
+    private_inputs =
+      triggers
+      |> Enum.flat_map(&related_fields(evaluator.private_inputs, &1))
+
+    to_check =
+      state.to_check
+      |> Map.merge(to_set(triggers))
+      |> Map.merge(to_set(private_inputs))
+
+    %{state | to_check: to_check}
+  end
+
+  defp do_update(struct, field, assigns, module) do
+    case Keyword.get(assigns, field) do
+      nil ->
+        apply(module, field, [struct])
+
+      value ->
+        struct!(struct, [{field, value}])
+    end
+  end
+
+  defp to_set(list) do
+    Map.new(list, &{&1, true})
+  end
+
+  defp related_fields(category, field) do
+    Map.get(category, field, [])
   end
 
   def assert_valid_inputs(evaluator, keys, struct) do
@@ -52,18 +98,6 @@ defmodule ReactiveState.Evaluator do
         raise(KeyError, key: key, term: struct)
       end
     end)
-  end
-
-  defp determine_affected(_, [], affected) do
-    affected
-  end
-
-  defp determine_affected(evaluator, [key | keys], affected) do
-    triggers = evaluator.triggers[key] || []
-    private = evaluator.private_inputs[key] || []
-
-    affected = Enum.reduce(triggers ++ private, affected, &Map.put(&2, &1, true))
-    determine_affected(evaluator, triggers ++ keys, affected)
   end
 
   defp private_fields(nodes) do
