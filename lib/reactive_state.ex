@@ -1,18 +1,9 @@
 defmodule ReactiveState do
-  @moduledoc """
-  Documentation for `ReactiveState`.
-  """
-
-  @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> ReactiveState.hello()
-      :world
-
-  """
-  def hello do
-    :world
+  defmacro __using__(_opts) do
+    quote do
+      use ReactiveState.Macro
+    end
   end
+
+  defdelegate assign(struct, attrs), to: __MODULE__.Assign
 end
